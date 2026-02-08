@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS "users" (
    id INTEGER,
    user_name TEXT NOT NULL UNIQUE,
    email TEXT NOT NULL UNIQUE,
-   creation_date TEXT DEFAULT CURRENT_TIMESTAMP,
+   creation_date TEXT DEFAULT CURRENT_TIMESTAMP ,
    PRIMARY KEY ("id")
 );
 /*
@@ -18,7 +18,7 @@ plan name check ile gırısler kısıtlanmıstır.mevcut planlar basıt standart
 */
 CREATE TABLE IF NOT EXISTS "account_plans"(
    id INTEGER,
-   plan_name TEXT CHECK(plan_name IN ('basic','standart','premium')),
+   plan_name TEXT CHECK(plan_name IN ('free','standart','premium')),
    price REAL CHECK(price>0), 
    duration_month INTEGER NOT NULL,
    PRIMARY KEY("id")
@@ -62,7 +62,6 @@ CREATE TABLE IF NOT EXISTS "activity_logs"(
    action_type TEXT NOT NULL CHECK (action_type IN ('login','logout','plan_change','payment_failed')),
    action_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
    descriptions TEXT,
-   ip_adress TEXT,
    PRIMARY KEY("id"),
    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE 
 );
