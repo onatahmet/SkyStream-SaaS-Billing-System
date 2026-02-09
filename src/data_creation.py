@@ -1,62 +1,88 @@
+import sqlite3
+import os
+import random
 from faker import Faker
-import csv
+from datetime import datetime, timedelta
 
-def generate_user_data(number):
-    """
-    Faker kütüphanesini kullanarak belirtilen sayıda 
-    eşsiz kullanıcı adı ve e-posta adresi üretir.
-    """
-    fake = Faker()
-    user_data = []
+# 1. Klasör ve Path Ayarları
+current_dir = os.path.dirname(os.path.abspath(__file__)) # src klasörü
+base_dir = os.path.dirname(current_dir) # SkyStream ana klasörü
+sql_path = os.path.join(base_dir, "sql", "database.sql")
+db_path = os.path.join(current_dir, "database.db")
 
-    for i in range(number):
-        # Veritabanında UNIQUE kısıtlaması olduğu için .unique özelliğini kullanıyoruz.
-        # Böylece aynı isim veya mailin iki kez üretilmesini engelliyoruz.
-        user = {
-            'User_name': fake.unique.user_name(),
-            'Email': fake.unique.email()
-        }
-        user_data.append(user)
+fake = Faker()
 
-    return user_data
+def main():
+    # 2. Bağlantı ve Başlatma
+    db = sqlite3.connect(db_path)
+    cursor = db.cursor()
+    
+    # SQLite'da Foreign Key ve Trigger desteğini her bağlantıda açman lazım
+    cursor.execute("PRAGMA foreign_keys = ON;")
 
-def save_to_csv(data, filename):
-    """
-    Üretilen sözlük listesini (list of dicts) alır ve 
-    bir CSV dosyası olarak diske kaydeder.
-    """
-    # Eğer liste boşsa fonksiyonu sonlandırıyoruz.
-    if not data:
-        print("[-] Veri listesi boş, işlem yapılmadı.")
+    # 3. Şemayı Yükle (Tabloları Sıfırdan Oluştur)
+    print("--- Tablolar oluşturuluyor ---")
+    try:
+        with open(sql_path, 'r', encoding='utf-8') as f:
+            cursor.executescript(f.read())
+    except FileNotFoundError:
+        print(f"Hata: {sql_path} bulunamadı!")
         return
+
+    # 4. Planları Ekle
+    print("--- Planlar ekleniyor ---")
+    plans = [
+        ('free', 0.0, 0),
+        ('standart', 15.99, 3),
+        ('premium', 29.99, 12)
+    ]
+    cursor.executemany('INSERT INTO account_plans (plan_name, price, duration_month) VALUES (?, ?, ?)', plans)
+
+    # 5. Faker ile Toplu Veri Üretimi
+    print("--- Kullanıcılar ve abonelikler basılıyor ---")
+    user_count = 50
     
-    # Listenin ilk elemanındaki anahtarları (User_name, Email) alıp 
-    # CSV'nin sütun başlıkları (fieldnames) olarak belirliyoruz.
-    keys = data[0].keys()
+    for _ in range(user_count):
+        # Kullanıcıyı ekle
+        u_name = fake.user_name()
+        u_email = fake.email()
+        cursor.execute('INSERT INTO users (user_name, email) VALUES (?, ?)', (u_name, u_email))
+        user_id = cursor.lastrowid
 
-    # Dosyayı yazma ('w') modunda açıyoruz. 
-    # encoding='utf-8' Türkçe veya özel karakterlerin bozulmasını önler.
-    with open(filename, 'w', newline='', encoding='utf-8') as output_file:
-        # DictWriter, sözlük yapısındaki verileri CSV'ye uygun hale getirir.
-        writer = csv.DictWriter(output_file, fieldnames=keys)
+        # Rastgele bir plan seç (1: free, 2: standart, 3: premium)
+        plan_id = random.randint(1, 3)
         
-        # Sütun isimlerini (User_name, Email) en başa yazar.
-        writer.writeheader()
+        # Rastgele tarihler (Son 1 yıl içinde başlamış olsun)
+        start_date = fake.date_between(start_date='-1y', end_date='today')
         
-        # ÖNEMLİ: 'data' bir liste olduğu için 'writerows' (çoğul) kullanıyoruz.
-        # Bu komut tüm listeyi tek seferde satır satır dosyaya işler.
-        writer.writerows(data)
+        # Plan süresine göre bitiş tarihini hesapla (Free ise 1 ay öylesine verdik)
+        duration = 1 if plan_id == 1 else (3 if plan_id == 2 else 12)
+        end_date = start_date + timedelta(days=duration * 30)
         
-    print(f'[+] Veriler {filename} dosyasına başarıyla kaydedildi.')
+        status = 'active' if end_date > datetime.now().date() else 'passive'
 
-# --- Çalıştırma Bölümü ---
+        # Aboneliği ekle
+        cursor.execute('''INSERT INTO subscriptions (user_id, plans_id, start_date, end_date, status) 
+                          VALUES (?, ?, ?, ?, ?)''', 
+                       (user_id, plan_id, start_date.isoformat(), end_date.isoformat(), status))
+        subs_id = cursor.lastrowid
+
+        # Ödemeyi ekle (%80 paid, %20 unpaid bas ki trigger test edilsin)
+        p_status = random.choices(['paid', 'unpaid'], weights=[80, 20])[0]
+        # Plan fiyatını basitçe manuel eşleştirdik (Geliştirilebilir)
+        price_map = {1: 0.0, 2: 15.99, 3: 29.99}
+        
+        cursor.execute('''INSERT INTO payments (subs_id, amount, payment_status) 
+                          VALUES (?, ?, ?)''', (subs_id, price_map[plan_id], p_status))
+
+    # 6. Değişiklikleri Kaydet ve Kapat
+    db.commit()
+    db.close()
+    print(f"\nİşlem tamam {user_count} kullanıcı ve bağlı verileri basıldı.")
+  
+
 if __name__ == "__main__":
-    # 50 adet sahte veri oluşturuyoruz.
-    num_users = 50
-    generated_data = generate_user_data(num_users)
-    
-    # Oluşturulan veriyi CSV dosyasına kaydediyoruz.
-    save_to_csv(generated_data, 'users_data.csv')
+    main()
 
   
   

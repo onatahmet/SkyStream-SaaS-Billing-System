@@ -19,7 +19,7 @@ plan name check ile gırısler kısıtlanmıstır.mevcut planlar basıt standart
 CREATE TABLE IF NOT EXISTS "account_plans"(
    id INTEGER,
    plan_name TEXT CHECK(plan_name IN ('free','standart','premium')),
-   price REAL CHECK(price>0), 
+   price REAL CHECK(price>=0), 
    duration_month INTEGER NOT NULL,
    PRIMARY KEY("id")
 );
@@ -65,3 +65,44 @@ CREATE TABLE IF NOT EXISTS "activity_logs"(
    PRIMARY KEY("id"),
    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE 
 );
+
+CREATE VIEW "user_summary" AS
+SELECT "user_name","email","plan_name" FROM "users"
+JOIN
+"subscriptions" ON "users"."id" = "subscriptions"."user_id"
+JOIN 
+"account_plans" ON "subscriptions"."plans_id" = "account_plans"."id"
+;
+
+CREATE INDEX "subs_index" 
+ON "subscriptions"("user_id")
+;
+
+CREATE INDEX  "payments_index"
+ON "payments"("subs_id")
+;
+
+CREATE TRIGGER "log_plan_change"
+AFTER UPDATE OF "plans_id" ON "subscriptions" -- Sadece plans_id değişirse çalışır
+FOR EACH ROW
+BEGIN
+    INSERT INTO "activity_logs" ("user_id", "action_type", "descriptions")
+    VALUES (
+        NEW.user_id, 
+        'plan_change', 
+        'Kullanıcı planını ' || OLD.plans_id || ' IDli plandan ' || NEW.plans_id || ' IDli plana yükseltti.'
+    );
+END;
+
+CREATE TRIGGER "log_payment_failure"
+AFTER INSERT ON "payments"
+FOR EACH ROW
+WHEN NEW.payment_status = 'unpaid' -- Sadece ödeme yapılmadıysa çalış
+BEGIN
+    INSERT INTO "activity_logs" ("user_id", "action_type", "descriptions")
+    VALUES (
+        (SELECT user_id FROM subscriptions WHERE id = NEW.subs_id), -- subs_id üzerinden user_id'yi çekiyoruz
+        'payment_failed',
+        'Abonelik ID: ' || NEW.subs_id || ' için ' || NEW.amount || ' tutarındaki ödeme başarısız oldu.'
+    );
+END;
